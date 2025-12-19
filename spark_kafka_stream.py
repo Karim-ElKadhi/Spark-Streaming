@@ -58,24 +58,50 @@ def main():
 
 
     agg_df = json_df.withWatermark("timestamp", "5 seconds") \
-                .groupBy(window("timestamp", "5 seconds"), "user_id") \
-                .agg(spark_sum("amount").alias("total_amount"))
+    .groupBy(window("timestamp", "10 seconds"), "user_id") \
+    .agg(spark_sum("amount").alias("total_amount")) \
+    .withColumn("window_start", col("window.start")) \
+    .withColumn("window_end", col("window.end")) \
+    .drop("window")
+
+
+    query = agg_df.writeStream \
+    .outputMode("complete") \
+    .format("memory") \
+    .queryName("agg_table") \
+    .trigger(processingTime="10 seconds") \
+    .start()
+
+
     #agg_df = json_df.groupBy("user_id").agg(spark_sum("amount").alias("total_amount"))
     #agg_df = json_df.withColumn("transaction_id_length", length(col("transaction_id")))
+    plt.ion()
+    fig, ax = plt.subplots()
 
+    while True:
+        df = spark.sql("SELECT * FROM agg_table").toPandas()
+
+        if not df.empty:
+            ax.clear()
+
+            # Agrégation finale par user (au cas où plusieurs fenêtres existent)
+            grouped = df.groupby("user_id")["total_amount"].sum()
+
+            ax.bar(
+                grouped.index.astype(str),
+                grouped.values
+            )
+
+            ax.set_title("Total amount per user")
+            ax.set_xlabel("User ID")
+            ax.set_ylabel("Total amount")
+
+            plt.draw()
+
+        plt.pause(1)
 
 
     # TODO 8: Write the streaming output
-    query = agg_df.writeStream \
-        .outputMode("complete") \
-        .format("memory") \
-        .queryName("agg_table") \
-        .start()
-
-    df = spark.sql("SELECT * FROM agg_table").toPandas()
-
-    plt.bar(df['user_id'], df['total_amount'])
-    plt.show()
 
     # TODO 9: Keep the streaming query running
     query.awaitTermination()
